@@ -39,7 +39,7 @@ def generate_dataset():
         business_stage = random.choice(['early stage', 'growth stage', 'mature stage', 'decline stage'])
         business_size = random.choice(['small', 'medium', 'large'])
         business_age = random.choice(['new', 'established', 'old'])
-        generated_text = lm(f'Random input: {random_number} Location: {location} Business sector: {business_sector} Business stage: {business_stage} Business size: {business_size} Business age: {business_age}\n\nGenerate a company description for a company with the abouve attributes. Generated text: ', max_tokens=50)
+        generated_text = lm(f'Random input: {random_number} Location: {location} Business sector: {business_sector} Business stage: {business_stage} Business size: {business_size} Business age: {business_age}\n\nGenerate a very long company description for a company with the abouve attributes. Generated text: ', max_tokens=1000)[0]
         print("generated_text:", generated_text)
         dataset.append(dspy.Example(company_description=generated_text).with_inputs('company_description'))
 
@@ -50,6 +50,7 @@ generate_dataset()
 
 class GenerateMail(dspy.Signature):
     """Generate an engaging email that effectively makes it clear to the recepient why they specifically should buy a new company office."""
+    company_description = dspy.InputField(desc="Company description")
     mail = dspy.OutputField(desc="Generated email")
 
 
@@ -69,7 +70,8 @@ class Emailer(dspy.Module):
         self.generate_mail = dspy.ChainOfThought(GenerateMail)
 
     def forward(self, company_description):
-        generation_output = self.generate_mail()
+        print("company_description:", company_description)
+        generation_output = self.generate_mail(company_description=company_description)
         generated_mail = generation_output.mail
         generated_mail = generated_mail.split('---')[0]
 
@@ -124,10 +126,11 @@ def great_mail_metric(gold, pred, trace=None, return_individual_scores=False):
 TRAIN_SIZE = int(2**7)
 DEV_SIZE_0 = int(2**2)
 DEV_SIZE_1 = int(2**4)
+# TRAIN_SIZE = int(2**10)
+# DEV_SIZE_0 = int(2**2)
+# DEV_SIZE_1 = int(2**4)
 dataset = generate_dataset()
-trainset = dataset[:TRAIN_SIZE]
-devset_0 = dataset[TRAIN_SIZE:TRAIN_SIZE+DEV_SIZE_0]
-devset_1 = dataset[TRAIN_SIZE+DEV_SIZE_0:TRAIN_SIZE+DEV_SIZE_0+DEV_SIZE_1]
+random.shuffle(dataset)
 
 def run_optimization(evaluate=True):
     num_candidate_programs = 6
@@ -135,6 +138,9 @@ def run_optimization(evaluate=True):
     emailer = assert_transform_module(Emailer().map_named_predictors(Retry), backtrack_handler)
     nesting_scores = []
     if evaluate:
+        trainset = dataset[:TRAIN_SIZE]
+        devset_0 = dataset[TRAIN_SIZE:TRAIN_SIZE+DEV_SIZE_0]
+        devset_1 = dataset[TRAIN_SIZE+DEV_SIZE_0:TRAIN_SIZE+DEV_SIZE_0+DEV_SIZE_1]
         evaluate = Evaluate(metric=great_mail_metric, devset=devset_1, num_threads=32, display_progress=True, display_table=5)
         score_start = evaluate(emailer)
         print("score_start:", score_start)
@@ -144,6 +150,10 @@ def run_optimization(evaluate=True):
     num_nesting_levels = 20
     for nesting_level in range(num_nesting_levels):
         print("nesting_level:", nesting_level)
+        random.shuffle(dataset)
+        trainset = dataset[:TRAIN_SIZE]
+        devset_0 = dataset[TRAIN_SIZE:TRAIN_SIZE+DEV_SIZE_0]
+        devset_1 = dataset[TRAIN_SIZE+DEV_SIZE_0:TRAIN_SIZE+DEV_SIZE_0+DEV_SIZE_1]
         teleprompter = BootstrapFewShotWithRandomSearch(metric = great_mail_metric, max_bootstrapped_demos=max_bootstrapped_demos, num_candidate_programs=num_candidate_programs, num_threads=32, metric_threshold=None)
         compiled_with_assertions_mailer = teleprompter.compile(student=emailer, trainset=trainset, valset=devset_0, teacher=compiled_with_assertions_mailer)
         if evaluate:
